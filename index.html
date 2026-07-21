@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>皮卡丘桌宠</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { display: flex; height: 100vh; overflow: hidden; font-family: 'PingFang SC','Microsoft YaHei',sans-serif; background: #0a0e1a; user-select: none; }
+  #pet-area {
+    width: 50%; height: 100%; position: relative;
+    background: linear-gradient(180deg, #2a4a1a 0%, #1a3a0a 40%, #0d1a06 70%, #1a3a0a 100%);
+    overflow: hidden; cursor: grab;
+  }
+  #pet-area:active { cursor: grabbing; }
+  #pet-area canvas { display: block; }
+  #pet-name {
+    position: absolute; top: 5%; left: 50%; transform: translateX(-50%);
+    font-size: 22px; font-weight: bold; color: #FFD700; letter-spacing: 4px;
+    pointer-events: none; text-shadow: 0 0 20px rgba(255,215,0,0.7), 0 0 40px rgba(255,180,0,0.4);
+  }
+  #pet-status {
+    position: absolute; bottom: 10%; left: 50%; transform: translateX(-50%);
+    font-size: 13px; color: #FFCC00; pointer-events: none; opacity: 0;
+    transition: opacity 0.4s; letter-spacing: 1px; text-shadow: 0 0 10px rgba(255,215,0,0.4);
+  }
+  #pet-status.show { opacity: 1; }
+
+  #chat-area {
+    width: 50%; height: 100%; display: flex; flex-direction: column;
+    background: #0f1a09; border-left: 1px solid rgba(255,200,0,0.15);
+  }
+  #chat-header { padding: 20px 24px 14px; border-bottom: 1px solid rgba(255,200,0,0.12); display: flex; align-items: center; gap: 10px; }
+  #chat-header .dot { width: 10px; height: 10px; border-radius: 50%; background: #FFD700; box-shadow: 0 0 10px #FFD700; animation: dotPulse 2s infinite; }
+  @keyframes dotPulse { 0%,100%{box-shadow:0 0 8px #FFD700} 50%{box-shadow:0 0 20px #FFD700,0 0 30px #FFD70088} }
+  #chat-header span { color: #FFD700; font-size: 15px; letter-spacing: 2px; }
+  #chat-messages { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
+  #chat-messages::-webkit-scrollbar { width: 4px; }
+  #chat-messages::-webkit-scrollbar-thumb { background: rgba(255,200,0,0.2); border-radius: 2px; }
+  .msg { max-width: 82%; padding: 12px 18px; border-radius: 18px; font-size: 14px; line-height: 1.7; letter-spacing: 0.5px; animation: msgIn 0.35s ease-out; }
+  @keyframes msgIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+  .msg.character { align-self: flex-start; background: rgba(255,200,0,0.12); color: #FFE8A0; border-bottom-left-radius: 4px; border: 1px solid rgba(255,200,0,0.18); }
+  .msg.user { align-self: flex-end; background: rgba(255,200,0,0.2); color: #FFF0C0; border-bottom-right-radius: 4px; border: 1px solid rgba(255,200,0,0.25); }
+  #chat-options { padding: 14px 24px; border-top: 1px solid rgba(255,200,0,0.12); display: flex; flex-wrap: wrap; gap: 8px; min-height: 75px; align-items: flex-start; }
+  #chat-options button {
+    padding: 8px 18px; border: 1px solid rgba(255,200,0,0.35); border-radius: 20px;
+    background: rgba(255,200,0,0.08); color: #FFD700; font-size: 13px;
+    cursor: pointer; letter-spacing: 1px; transition: all 0.25s; font-family: inherit; white-space: nowrap;
+  }
+  #chat-options button:hover { background: rgba(255,200,0,0.2); border-color: #FFD700; box-shadow: 0 0 18px rgba(255,200,0,0.2); transform: translateY(-1px); }
+  #chat-options button:active { transform: scale(0.95); }
+
+  @media (max-width: 768px) {
+    body { flex-direction: column; }
+    #pet-area { width: 100%; height: 42%; }
+    #chat-area { width: 100%; height: 58%; }
+  }
+</style>
+</head>
+<body>
+
+<div id="pet-area">
+  <div id="pet-name">⚡ 皮卡丘 ⚡</div>
+  <div id="pet-status"></div>
+</div>
+
+<div id="chat-area">
+  <div id="chat-header"><div class="dot"></div><span>对话窗口</span></div>
+  <div id="chat-messages">
+    <div class="msg character">
+      皮卡皮卡！⚡
+    </div>
+  </div>
+  <div id="chat-options">
+    <button onclick="sendMessage('打招呼')">👋 打招呼</button>
+    <button onclick="sendMessage('电击')">⚡ 十万伏特</button>
+    <button onclick="sendMessage('夸奖')">💖 夸奖它</button>
+    <button onclick="sendMessage('摸摸头')">✋ 摸摸头</button>
+    <button onclick="sendMessage('一起玩')">🎮 一起玩</button>
+    <button onclick="sendMessage('番茄酱')">🍅 给番茄酱</button>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+const petArea = document.getElementById('pet-area');
+const petStatus = document.getElementById('pet-status');
+const W = petArea.clientWidth, H = petArea.clientHeight;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, W / H, 0.1, 20);
+camera.position.set(0, 1.1, 5.5);
+camera.lookAt(0, 0.9, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(W, H);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setClearColor(0x000000, 0);
+petArea.appendChild(renderer.domElement);
+
+// 光照
+scene.add(new THREE.AmbientLight(0xffffdd, 2.5));
+scene.add(new THREE.HemisphereLight(0xffffcc, 0x557744, 1.2));
+const keyLight = new THREE.DirectionalLight(0xffffff, 5);
+keyLight.position.set(4, 7, 5);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.width = 1024; keyLight.shadow.mapSize.height = 1024;
+keyLight.shadow.camera.near = 0.3; keyLight.shadow.camera.far = 20;
+keyLight.shadow.camera.left = -5; keyLight.shadow.camera.right = 5;
+keyLight.shadow.camera.top = 5; keyLight.shadow.camera.bottom = -5;
+keyLight.shadow.bias = -0.0002;
+scene.add(keyLight);
+const warmRim = new THREE.DirectionalLight(0xffcc88, 3);
+warmRim.position.set(-2, 2, -3);
+scene.add(warmRim);
+const fillL = new THREE.DirectionalLight(0xffffdd, 2);
+fillL.position.set(0, 0.5, 3);
+scene.add(fillL);
+const gGlow = new THREE.PointLight(0xFFD700, 6, 4);
+gGlow.position.set(0, -1.3, 0);
+scene.add(gGlow);
+
+// 地面
+const ground = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.9, 1.0, 0.08, 48),
+  new THREE.MeshStandardMaterial({ color: 0x446633, roughness: 0.4, metalness: 0.2 })
+);
+ground.position.y = -1.5; ground.receiveShadow = true; ground.castShadow = true;
+scene.add(ground);
+
+const ring = new THREE.Mesh(
+  new THREE.TorusGeometry(0.95, 0.025, 16, 64),
+  new THREE.MeshStandardMaterial({ color: 0xFFD700, roughness: 0.1, metalness: 0.2, emissive: 0xFFD700, emissiveIntensity: 0.6 })
+);
+ring.rotation.x = -Math.PI / 2; ring.position.y = -1.45;
+scene.add(ring);
+
+// 装饰草丛
+for (let i = 0; i < 6; i++) {
+  const a = (i / 6) * Math.PI * 2;
+  const grass = new THREE.Mesh(
+    new THREE.ConeGeometry(0.05, 0.18, 4),
+    new THREE.MeshStandardMaterial({ color: 0x55bb44, roughness: 0.5 })
+  );
+  grass.position.set(Math.cos(a) * 1.2, -1.43, Math.sin(a) * 1.2);
+  grass.rotation.z = (Math.random() - 0.5) * 0.4;
+  grass.rotation.x = (Math.random() - 0.5) * 0.4;
+  scene.add(grass);
+}
+
+// ==================== 皮卡丘材质 ====================
+function softMat(hex, opts = {}) {
+  return new THREE.MeshToonMaterial({ color: new THREE.Color(hex), ...opts });
+}
+
+// 皮卡丘黄 - 准确的暖黄色
+const pikaYellow = softMat('#F7D44A', { roughness: 0.25 });
+const pikaYellowDark = softMat('#E8C030', { roughness: 0.25 });
+const blackMat = new THREE.MeshStandardMaterial({ color: 0x1A1A1A, roughness: 0.3 });
+const redCheek = new THREE.MeshStandardMaterial({ color: 0xFF3333, roughness: 0.2, emissive: 0xFF2222, emissiveIntensity: 0.4 });
+const brownStripe = softMat('#9B6B3C', { roughness: 0.3 });
+const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.02 });
+const eyeBlack = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.05 });
+const eyeHL = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.02, emissive: 0xffffff, emissiveIntensity: 0.8 });
+const mouthMat = softMat('#6B3333', { roughness: 0.2 });
+const noseMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 });
+
+// ==================== 皮卡丘 ====================
+const pikachu = new THREE.Group();
+pikachu.position.y = 0;
+scene.add(pikachu);
+
+// -- 身体（梨形：上窄下宽）--
+// 使用 LatheGeometry 创建梨形轮廓
+const bodyProfile = [];
+const bodySegments = 32;
+// 从上到下：窄 -> 宽 -> 收窄
+for (let i = 0; i <= bodySegments; i++) {
+  const t = i / bodySegments;
+  const y = 1.0 - t; // 从顶部(1.0)到底部(0)
+  // 半径曲线：顶部窄，中间最宽，底部略收
+  let r;
+  if (t < 0.3) {
+    r = 0.15 + t * 2.0; // 0.15 -> 0.75
+  } else if (t < 0.7) {
+    r = 0.75 - (t - 0.3) * 0.25; // 0.75 -> 0.65
+  } else {
+    r = 0.65 - (t - 0.7) * 1.5; // 0.65 -> 0.2
+  }
+  bodyProfile.push(new THREE.Vector2(r, y));
+}
+const bodyGeom = new THREE.LatheGeometry(bodyProfile, 32);
+const body = new THREE.Mesh(bodyGeom, pikaYellow);
+body.position.y = 0.55;
+body.castShadow = true; body.receiveShadow = true;
+body.name = 'body';
+pikachu.add(body);
+
+// 背部棕色条纹
+for (let i = 0; i < 2; i++) {
+  const stripeGeom = new THREE.TorusGeometry(0.55, 0.035, 8, 32, Math.PI * 0.35);
+  const stripe = new THREE.Mesh(stripeGeom, brownStripe);
+  stripe.position.set(0, 0.75 + i * 0.2, -0.5);
+  stripe.rotation.x = 0.3;
+  stripe.rotation.y = Math.PI;
+  stripe.name = 'backStripe';
+  pikachu.add(stripe);
+}
+
+// -- 头部 --
+const headGroup = new THREE.Group();
+headGroup.position.y = 1.35;
+headGroup.name = 'headGroup';
+pikachu.add(headGroup);
+
+// 头是一个略扁的球
+const headGeom = new THREE.SphereGeometry(0.46, 44, 44);
+const head = new THREE.Mesh(headGeom, pikaYellow);
+head.scale.set(1, 0.88, 0.95);
+head.castShadow = true; head.receiveShadow = true;
+head.name = 'head';
+headGroup.add(head);
+
+// -- 耳朵（长尖耳）--
+const earGroup = new THREE.Group();
+earGroup.name = 'earGroup';
+headGroup.add(earGroup);
+
+function createEar(x) {
+  const group = new THREE.Group();
+
+  // 耳朵主体 - 又长又尖
+  const earPoints = [];
+  for (let i = 0; i <= 20; i++) {
+    const t = i / 20;
+    const y = t * 0.85;
+    const r = 0.09 * (1 - t * 0.8);
+    earPoints.push(new THREE.Vector2(r, y));
+  }
+  const earGeom = new THREE.LatheGeometry(earPoints, 12);
+  const ear = new THREE.Mesh(earGeom, pikaYellow);
+  ear.castShadow = true;
+  group.add(ear);
+
+  // 黑色耳尖
+  const tipGeom = new THREE.ConeGeometry(0.065, 0.22, 12);
+  const tip = new THREE.Mesh(tipGeom, blackMat);
+  tip.position.y = 0.78;
+  group.add(tip);
+
+  group.position.set(x, 0.32, -0.08);
+  group.rotation.z = x > 0 ? 0.22 : -0.22;
+  group.rotation.x = -0.12;
+  return group;
+}
+
+const leftEar = createEar(-0.22);
+leftEar.name = 'leftEar';
+earGroup.add(leftEar);
+const rightEar = createEar(0.22);
+rightEar.name = 'rightEar';
+earGroup.add(rightEar);
+
+// -- 眼睛 --
+const eyesGroup = new THREE.Group();
+eyesGroup.position.set(0, 0.06, 0.4);
+eyesGroup.name = 'eyesGroup';
+headGroup.add(eyesGroup);
+
+const eyeParts = { left: {}, right: {} };
+
+function createEye(x) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, 0);
+
+  // 眼白（圆形）
+  const white = new THREE.Mesh(new THREE.SphereGeometry(0.1, 20, 20), eyeWhite);
+  white.scale.set(0.7, 1.05, 0.18);
+  group.add(white);
+
+  // 黑眼珠（皮卡丘是大黑眼珠，几乎占满眼白）
+  const iris = new THREE.Mesh(new THREE.SphereGeometry(0.08, 20, 20), eyeBlack);
+  iris.scale.set(0.72, 0.95, 0.14);
+  iris.position.z = 0.02;
+  iris.name = 'iris';
+  group.add(iris);
+
+  // 大高光
+  const hl1 = new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 10), eyeHL);
+  hl1.position.set(0.02, 0.028, 0.05);
+  hl1.name = 'hl1';
+  group.add(hl1);
+
+  // 小高光
+  const hl2 = new THREE.Mesh(new THREE.SphereGeometry(0.015, 8, 8), eyeHL);
+  hl2.position.set(-0.018, 0.008, 0.05);
+  hl2.name = 'hl2';
+  group.add(hl2);
+
+  return group;
+}
+
+const leftEye = createEye(-0.17);
+leftEye.name = 'leftEye';
+eyesGroup.add(leftEye);
+const rightEye = createEye(0.17);
+rightEye.name = 'rightEye';
+eyesGroup.add(rightEye);
+
+for (const [side, g] of [['left', leftEye], ['right', rightEye]]) {
+  g.children.forEach(c => {
+    if (c.name === 'iris') eyeParts[side].iris = c;
+    if (c.name === 'hl1') eyeParts[side].hl1 = c;
+    if (c.name === 'hl2') eyeParts[side].hl2 = c;
+  });
+  eyeParts[side].pupil = eyeParts[side].iris;
+}
+
+// -- 鼻子（小黑点）--
+const nose = new THREE.Mesh(
+  new THREE.SphereGeometry(0.04, 12, 12),
+  noseMat
+);
+nose.position.set(0, -0.04, 0.44);
+headGroup.add(nose);
+
+// -- 嘴巴（皮卡丘的"3"形嘴）--
+const mouthGroup = new THREE.Group();
+mouthGroup.position.set(0, -0.1, 0.43);
+headGroup.add(mouthGroup);
+const mouth = new THREE.Mesh(
+  new THREE.TorusGeometry(0.045, 0.012, 8, 10, Math.PI),
+  mouthMat
+);
+mouth.rotation.z = Math.PI;
+mouth.name = 'mouth';
+mouthGroup.add(mouth);
+
+// -- 腮红（正圆形，皮卡丘标志）--
+const cheekMeshes = [];
+for (let side of [-1, 1]) {
+  const cheek = new THREE.Mesh(
+    new THREE.CircleGeometry(0.1, 24),
+    redCheek
+  );
+  cheek.position.set(side * 0.23, -0.08, 0.42);
+  cheek.name = 'cheek';
+  cheekMeshes.push(cheek);
+  headGroup.add(cheek);
+}
+
+// -- 手臂（短粗）--
+const armGroup = new THREE.Group();
+armGroup.position.y = 0.85;
+armGroup.name = 'armGroup';
+pikachu.add(armGroup);
+
+function createArm(x) {
+  const arm = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.1, 0.22, 8, 8),
+    pikaYellow
+  );
+  arm.position.set(x, 0.02, 0);
+  arm.rotation.z = x > 0 ? -0.55 : 0.55;
+  arm.castShadow = true;
+  arm.name = 'arm';
+  return arm;
+}
+
+const leftArm = createArm(-0.52);
+leftArm.name = 'leftArm';
+armGroup.add(leftArm);
+const rightArm = createArm(0.52);
+rightArm.name = 'rightArm';
+armGroup.add(rightArm);
+
+// -- 脚（长椭圆形）--
+const legGroup = new THREE.Group();
+legGroup.position.y = 0.18;
+legGroup.name = 'legGroup';
+pikachu.add(legGroup);
+
+function createFoot(x) {
+  const foot = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.14, 0.2, 8, 8),
+    pikaYellow
+  );
+  foot.position.set(x, -0.15, 0.08);
+  foot.rotation.x = 0.35;
+  foot.scale.set(1, 0.5, 1.4);
+  foot.castShadow = true;
+  foot.receiveShadow = true;
+  foot.name = 'foot';
+  return foot;
+}
+
+const leftFoot = createFoot(-0.22);
+leftFoot.name = 'leftFoot';
+legGroup.add(leftFoot);
+const rightFoot = createFoot(0.22);
+rightFoot.name = 'rightFoot';
+legGroup.add(rightFoot);
+
+// -- 尾巴（闪电⚡ + 棕色根部）--
+const tailGroup = new THREE.Group();
+tailGroup.position.set(0.08, 0.55, -0.52);
+tailGroup.rotation.x = -0.35;
+tailGroup.rotation.y = 0.25;
+tailGroup.name = 'tailGroup';
+pikachu.add(tailGroup);
+
+// 闪电形状用自定义挤出
+const lightningShape = new THREE.Shape();
+const lw = 0.06;
+lightningShape.moveTo(-lw, 0);
+lightningShape.lineTo(lw, 0);
+lightningShape.lineTo(-lw * 0.5, 0.3);
+lightningShape.lineTo(lw * 0.7, 0.3);
+lightningShape.lineTo(-lw * 0.3, 0.6);
+lightningShape.lineTo(lw * 0.5, 0.6);
+lightningShape.lineTo(-lw, 0.8);
+lightningShape.lineTo(lw * 0.3, 0.8);
+lightningShape.lineTo(-lw * 0.5, 0.48);
+lightningShape.lineTo(lw * 0.5, 0.48);
+lightningShape.lineTo(-lw * 0.5, 0.18);
+lightningShape.lineTo(lw, 0.18);
+lightningShape.closePath();
+
+const tailExtSettings = { depth: 0.04, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.015, bevelSegments: 2 };
+const tailGeom = new THREE.ExtrudeGeometry(lightningShape, tailExtSettings);
+const tailMesh = new THREE.Mesh(tailGeom, pikaYellow);
+tailMesh.position.y = 0.08;
+tailMesh.name = 'tail';
+tailGroup.add(tailMesh);
+
+// 尾巴根部棕色块
+const tailBaseGeom = new THREE.BoxGeometry(0.18, 0.14, 0.06);
+const tailBase = new THREE.Mesh(tailBaseGeom, brownStripe);
+tailBase.position.y = 0.03;
+tailBase.name = 'tailBase';
+tailGroup.add(tailBase);
+
+// ==================== 鼠标追踪 ====================
+const mouse = new THREE.Vector2();
+let petRect = petArea.getBoundingClientRect();
+petArea.addEventListener('mousemove', (e) => {
+  mouse.x = ((e.clientX - petRect.left) / petArea.clientWidth) * 2 - 1;
+  mouse.y = -((e.clientY - petRect.top) / petArea.clientHeight) * 2 + 1;
+});
+
+let isDragging = false, prevMouse = { x: 0, y: 0 };
+let targetRotY = 0, targetRotX = 0;
+petArea.addEventListener('mousedown', (e) => {
+  isDragging = true; prevMouse.x = e.clientX; prevMouse.y = e.clientY;
+});
+window.addEventListener('mouseup', () => { isDragging = false; });
+window.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  targetRotY += (e.clientX - prevMouse.x) * 0.005;
+  targetRotX += (e.clientY - prevMouse.y) * 0.003;
+  targetRotX = THREE.MathUtils.clamp(targetRotX, -0.3, 0.3);
+  prevMouse.x = e.clientX; prevMouse.y = e.clientY;
+});
+petArea.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 1) { isDragging = true; prevMouse.x = e.touches[0].clientX; prevMouse.y = e.touches[0].clientY; }
+});
+petArea.addEventListener('touchmove', (e) => {
+  if (!isDragging) return;
+  targetRotY += (e.touches[0].clientX - prevMouse.x) * 0.005;
+  targetRotX += (e.touches[0].clientY - prevMouse.y) * 0.003;
+  targetRotX = THREE.MathUtils.clamp(targetRotX, -0.3, 0.3);
+  prevMouse.x = e.touches[0].clientX; prevMouse.y = e.touches[0].clientY;
+});
+petArea.addEventListener('touchend', () => { isDragging = false; });
+
+// ==================== 表情系统 ====================
+let currentExpression = 'neutral';
+let expressionTimer = 0, expressionDuration = 0;
+let blinkTimer = 0, nextBlink = 2.5 + Math.random() * 3;
+let blinking = false, blinkProgress = 0;
+
+const expressions = {
+  neutral:  { mouthSX: 1, mouthSY: 1, cheekOp: 0.7 },
+  happy:    { mouthSX: 0.7, mouthSY: 1.5, cheekOp: 0.95 },
+  surprised:{ mouthSX: 1.3, mouthSY: 0.4, cheekOp: 0.4 },
+  love:     { mouthSX: 0.5, mouthSY: 0.55, cheekOp: 0.9 },
+  angry:    { mouthSX: 1.2, mouthSY: 0.55, cheekOp: 0.95 },
+};
+
+function setExpression(expr, dur = 3) {
+  if (!expressions[expr]) return;
+  currentExpression = expr; expressionDuration = dur; expressionTimer = 0;
+}
+function showStatus(text) {
+  petStatus.textContent = text; petStatus.classList.add('show');
+  clearTimeout(petStatus._t);
+  petStatus._t = setTimeout(() => petStatus.classList.remove('show'), 2500);
+}
+
+function updateEyeTracking() {
+  const range = 0.035;
+  const tx = THREE.MathUtils.clamp(mouse.x * 0.05, -range, range);
+  const ty = THREE.MathUtils.clamp(mouse.y * 0.035, -range * 0.7, range * 0.7);
+  for (const side of ['left', 'right']) {
+    const iris = eyeParts[side].iris;
+    if (!iris) continue;
+    iris.position.x = THREE.MathUtils.lerp(iris.position.x, tx, 0.12);
+    iris.position.y = THREE.MathUtils.lerp(iris.position.y, ty, 0.12);
+    const hl1 = eyeParts[side].hl1;
+    const hl2 = eyeParts[side].hl2;
+    if (hl1) { hl1.position.x = 0.02 + tx * 0.4; hl1.position.y = 0.028 + ty * 0.4; }
+    if (hl2) { hl2.position.x = -0.018 + tx * 0.4; hl2.position.y = 0.008 + ty * 0.4; }
+  }
+}
+
+function updateExpressionAnim(dt) {
+  if (expressionDuration > 0) {
+    expressionTimer += dt;
+    if (expressionTimer >= expressionDuration) { setExpression('neutral', 999); expressionDuration = 999; }
+  }
+  const expr = expressions[currentExpression] || expressions.neutral;
+  mouth.scale.x = THREE.MathUtils.lerp(mouth.scale.x, expr.mouthSX, 0.15);
+  mouth.scale.y = THREE.MathUtils.lerp(mouth.scale.y, expr.mouthSY, 0.15);
+  cheekMeshes.forEach(c => {
+    c.material.opacity = THREE.MathUtils.lerp(c.material.opacity, expr.cheekOp, 0.15);
+  });
+  blinkTimer += dt;
+  if (!blinking && blinkTimer >= nextBlink) { blinking = true; blinkProgress = 0; blinkTimer = 0; }
+  if (blinking) {
+    blinkProgress += dt * 8;
+    if (blinkProgress >= 1) { blinkProgress = 1; blinking = false; nextBlink = 2.5 + Math.random() * 4; }
+    const bs = blinkProgress < 0.5 ? 1 - blinkProgress * 2 : (blinkProgress - 0.5) * 2;
+    eyesGroup.scale.y = Math.max(bs, 0.04);
+  } else {
+    eyesGroup.scale.y = THREE.MathUtils.lerp(eyesGroup.scale.y, 1, 0.2);
+  }
+}
+
+// ==================== 姿势系统 ====================
+let currentPose = 'idle';
+const def = { charY: 0, charRZ: 0 };
+const poses = {
+  idle: { charY: 0, charRZ: 0 },
+  bounce: { charY: 0.35, charRZ: 0 },
+  tilt: { charY: 0, charRZ: 0.07 },
+  spark: { charY: 0, charRZ: 0 },
+};
+let targetState = { ...def }, currentState = { ...def };
+function lerp(a, b, t) { return a + (b - a) * t; }
+function setPose(name) {
+  if (!poses[name]) return;
+  currentPose = name; targetState = { ...poses[name] };
+}
+
+// ==================== 对话系统 ====================
+const chatMessages = document.getElementById('chat-messages');
+const chatOptions = document.getElementById('chat-options');
+function addMsg(type, text) {
+  const div = document.createElement('div'); div.className = `msg ${type}`; div.textContent = text;
+  chatMessages.appendChild(div); chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+const allTopics = ['打招呼', '电击', '夸奖', '摸摸头', '一起玩', '番茄酱'];
+const dialogues = {
+  '打招呼': {
+    user: '皮卡丘！你好呀～',
+    replies: ['皮卡皮卡！⚡\n见到你好开心！', '今天也一起加油吧～皮卡！'],
+    expression: 'happy', pose: 'bounce', status: '⚡ 皮卡皮卡！',
+  },
+  '电击': {
+    user: '皮卡丘，使用十万伏特！',
+    replies: ['皮卡————丘！！！⚡⚡⚡\n（全身迸发电光！）', '嘿嘿，厉害吧！'],
+    expression: 'angry', pose: 'spark', status: '⚡⚡⚡ 十万伏特！',
+  },
+  '夸奖': {
+    user: '皮卡丘你太可爱了！',
+    replies: ['皮卡～(⁄⁄>⁄▽⁄<⁄⁄)\n被夸了…好害羞…', '你也很棒哦！'],
+    expression: 'love', pose: 'tilt', status: '💕 害羞...',
+  },
+  '摸摸头': {
+    user: '（轻轻摸摸皮卡丘的头）',
+    replies: ['皮卡～丘～～\n好舒服呀…', '可以再摸摸耳朵吗？皮卡！'],
+    expression: 'love', pose: 'idle', status: '💛 幸福...',
+  },
+  '一起玩': {
+    user: '皮卡丘，一起玩吧！',
+    replies: ['皮卡皮！好呀！🎮\n来赛跑吧！', '我跑得可快了～'],
+    expression: 'happy', pose: 'bounce', status: '🎮 兴奋！',
+  },
+  '番茄酱': {
+    user: '给你番茄酱！🍅',
+    replies: ['皮卡皮卡！！！🍅\n番茄酱！！最爱！！', '你是世界上最好的人！皮卡～'],
+    expression: 'happy', pose: 'bounce', status: '🍅 最爱番茄酱！',
+  },
+};
+window.sendMessage = function(topic) {
+  const data = dialogues[topic]; if (!data) return;
+  addMsg('user', data.user); setExpression(data.expression, 4); setPose(data.pose);
+  if (data.status) showStatus(data.status);
+  data.replies.forEach((reply, i) => setTimeout(() => addMsg('character', reply), 700 + i * 1800));
+  setTimeout(() => setPose('idle'), 4000);
+  const others = allTopics.filter(t => t !== topic).sort(() => Math.random() - 0.5).slice(0, 5);
+  const labels = { '打招呼':'👋 打招呼','电击':'⚡ 十万伏特','夸奖':'💖 夸奖它','摸摸头':'✋ 摸摸头','一起玩':'🎮 一起玩','番茄酱':'🍅 番茄酱' };
+  chatOptions.innerHTML = others.map(t => `<button onclick="sendMessage('${t}')">${labels[t]}</button>`).join('');
+};
+
+// ==================== 动画循环 ====================
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.1);
+  const elapsed = performance.now() * 0.001;
+  petRect = petArea.getBoundingClientRect();
+
+  const ts = 1 - Math.exp(-5 * dt);
+  currentState.charY = lerp(currentState.charY, targetState.charY, ts);
+  currentState.charRZ = lerp(currentState.charRZ, targetState.charRZ, ts);
+
+  if (currentPose === 'bounce') {
+    pikachu.position.y = currentState.charY + Math.abs(Math.sin(elapsed * 4.5)) * 0.25;
+  } else {
+    pikachu.position.y = currentState.charY;
+  }
+  pikachu.rotation.z = currentState.charRZ;
+  if (currentPose === 'tilt') pikachu.rotation.z += Math.sin(elapsed * 3) * 0.05;
+
+  // 十万伏特
+  if (currentPose === 'spark') {
+    const shake = Math.sin(elapsed * 30) * 0.05;
+    pikachu.position.x = shake;
+    pikachu.position.y = Math.sin(elapsed * 30) * 0.04;
+    cheekMeshes.forEach(c => { c.material.emissiveIntensity = 0.5 + Math.abs(Math.sin(elapsed * 20)) * 2; });
+  } else {
+    pikachu.position.x = THREE.MathUtils.lerp(pikachu.position.x, 0, 0.1);
+    cheekMeshes.forEach(c => { c.material.emissiveIntensity = 0.4; });
+  }
+
+  if (currentPose === 'idle') {
+    pikachu.position.y = Math.sin(elapsed * 2.2) * 0.04;
+  }
+
+  // 耳朵微动
+  leftEar.rotation.z = -0.22 + Math.sin(elapsed * 2.5) * 0.06;
+  rightEar.rotation.z = 0.22 + Math.sin(elapsed * 2.5 + 0.5) * 0.06;
+
+  // 尾巴摆动
+  tailGroup.rotation.z = Math.sin(elapsed * 1.8) * 0.12;
+
+  if (!isDragging) { targetRotY *= 0.94; targetRotX *= 0.94; }
+  pikachu.rotation.y = targetRotY;
+  pikachu.rotation.x = targetRotX;
+
+  updateExpressionAnim(dt);
+  updateEyeTracking();
+
+  const pulse = 1 + Math.sin(elapsed * 2) * 0.1;
+  ring.scale.setScalar(pulse);
+  ring.material.emissiveIntensity = 0.5 + Math.sin(elapsed * 2) * 0.25;
+
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  const w = petArea.clientWidth, h = petArea.clientHeight;
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  renderer.setSize(w, h); petRect = petArea.getBoundingClientRect();
+});
+
+setExpression('neutral', 999);
+animate();
+console.log('⚡ 皮卡丘已上线！皮卡皮卡！');
+</script>
+</body>
+</html>
